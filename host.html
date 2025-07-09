@@ -1,0 +1,148 @@
+<!-- host.html -->
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <title>AI TikTok - HOST Control Panel</title>
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #f0f2f5; margin: 20px; color: #333; }
+        .container { max-width: 800px; margin: auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+        h1, h2 { color: #1c1e21; border-bottom: 1px solid #ddd; padding-bottom: 10px; }
+        .setup-box, .host-info, .controls { margin-bottom: 20px; padding: 15px; background: #f7f8fa; border: 1px solid #ddd; border-radius: 6px; }
+        input[type="text"] { width: calc(100% - 24px); padding: 12px; border: 1px solid #ccc; border-radius: 6px; font-size: 16px; margin-bottom: 10px; }
+        button { font-size: 16px; padding: 12px 20px; border: none; border-radius: 6px; background-color: #1877f2; color: white; cursor: pointer; font-weight: bold; transition: background-color 0.2s; }
+        button:hover { background-color: #166fe5; }
+        button:disabled { background-color: #9cb4d8; cursor: not-allowed; }
+        #audio-toggle-btn { background-color: #fa383e; margin-top: 10px; }
+        #audio-toggle-btn.unmuted { background-color: #31a24c; }
+        #log { min-height: 200px; max-height: 400px; overflow-y: auto; border: 1px solid #ddd; padding: 10px; border-radius: 6px; background: #fff; }
+        .log-item { padding: 8px; border-bottom: 1px solid #f0f2f5; }
+        .log-item:last-child { border-bottom: none; }
+        .log-item .user { font-weight: bold; }
+        .log-item.comment .user { color: #050505; }
+        .log-item.ai_response { background-color: #e7f3ff; border-radius: 6px; margin: 5px 0; }
+        .log-item.ai_response .user { color: #1877f2; }
+        .log-item.status .user { font-weight: bold; color: #65676b; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div id="host-setup-box" class="setup-box">
+            <h2>1. Setup Host P2P</h2>
+            <p>Masukkan ID unik untuk room Anda. Penonton akan menggunakan ID ini untuk terhubung.</p>
+            <input type="text" id="custom-room-id-input" placeholder="Contoh: live-seru-banget">
+            <button id="start-host-btn">Mulai Sebagai Host</button>
+            <p id="host-status"></p>
+        </div>
+
+        <div id="main-host-app" style="display: none;">
+            <h2>AI TikTok - Control Panel</h2>
+            <div class="host-info">
+                Status Host: <strong id="host-id-display"></strong> | Penonton Terhubung: <span id="client-count">0</span><br>
+                Status Koneksi TikTok: <span id="tiktok-status">Idle</span><br>
+                <button id="audio-toggle-btn">Unmute Audio (Host)</button>
+            </div>
+            <div class="controls">
+                <h2>2. Mulai Live</h2>
+                <input type="text" id="username-input" placeholder="Masukkan @username TikTok">
+                <button id="start-tiktok-btn">Mulai Koneksi TikTok</button>
+            </div>
+            <h2>Live Log</h2>
+            <div id="log"></div>
+        </div>
+    </div>
+
+    <script>
+    document.addEventListener('DOMContentLoaded', () => {
+        const API_URL = 'http://localhost:5000';
+        const hostSetupBox = document.getElementById('host-setup-box'), mainHostApp = document.getElementById('main-host-app'),
+              customRoomIdInput = document.getElementById('custom-room-id-input'), startHostBtn = document.getElementById('start-host-btn'),
+              hostStatusElem = document.getElementById('host-status'), hostIdDisplay = document.getElementById('host-id-display'),
+              clientCountElem = document.getElementById('client-count'), tiktokStatusElem = document.getElementById('tiktok-status'),
+              usernameInput = document.getElementById('username-input'), startTiktokBtn = document.getElementById('start-tiktok-btn'),
+              audioToggleBtn = document.getElementById('audio-toggle-btn'), logDiv = document.getElementById('log');
+
+        let peer = null, connections = [], syncInterval = null, lastTimestamp = 0, isAudioEnabled = false;
+        const speechQueue = [], isSpeaking = { value: false };
+
+        function processSpeechQueue() {
+            if (isSpeaking.value || speechQueue.length === 0 || !isAudioEnabled) return;
+            isSpeaking.value = true;
+            const textToSpeak = speechQueue.shift();
+            const utterance = new SpeechSynthesisUtterance(textToSpeak);
+            utterance.lang = 'id-ID'; utterance.rate = 1.3;
+            utterance.onend = () => { isSpeaking.value = false; processSpeechQueue(); };
+            speechSynthesis.speak(utterance);
+        }
+
+        function toggleAudio() {
+            isAudioEnabled = !isAudioEnabled;
+            audioToggleBtn.textContent = isAudioEnabled ? 'Mute Audio (Host)' : 'Unmute Audio (Host)';
+            audioToggleBtn.classList.toggle('unmuted', isAudioEnabled);
+            if (isAudioEnabled) { const wakeUp = new SpeechSynthesisUtterance(' '); wakeUp.volume = 0; speechSynthesis.speak(wakeUp); processSpeechQueue(); } 
+            else { speechSynthesis.cancel(); }
+        }
+
+        function startHost() {
+            const customRoomId = customRoomIdInput.value.trim();
+            if (!customRoomId) { alert("Silakan masukkan ID Room."); return; }
+            startHostBtn.disabled = true; hostStatusElem.textContent = "Menghubungkan...";
+            if (peer) peer.destroy();
+            peer = new Peer(customRoomId);
+            peer.on('open', id => { hostSetupBox.style.display = 'none'; mainHostApp.style.display = 'block'; hostIdDisplay.textContent = `Aktif dengan ID: ${id}`; if (syncInterval) clearInterval(syncInterval); syncInterval = setInterval(syncWithLocalServer, 2000); });
+            peer.on('connection', handleNewConnection);
+            peer.on('error', err => { hostStatusElem.textContent = `Error: ${err.type}. Coba ID lain.`; startHostBtn.disabled = false; });
+        }
+        
+        function handleNewConnection(conn) {
+            console.log(`Penonton baru terhubung: ${conn.peer}. Mengirim state awal...`);
+            connections.push(conn); updateClientCount();
+            fetch(`${API_URL}/api/status`).then(res => res.json()).then(state => { if (conn.open) conn.send(state); }).catch(err => console.error("Gagal mengirim state awal:", err));
+            conn.on('close', () => { connections = connections.filter(c => c.peer !== conn.peer); updateClientCount(); });
+        }
+        
+        function updateClientCount() { clientCountElem.textContent = connections.length; }
+        function broadcastToViewers(data) { connections.forEach(conn => { if (conn.open) conn.send(data); }); }
+
+        async function syncWithLocalServer() {
+            try {
+                const response = await fetch(`${API_URL}/api/status`);
+                const state = await response.json();
+                tiktokStatusElem.textContent = state.tiktok_status;
+                processNewLogs(state.log_items); 
+                broadcastToViewers(state);
+            } catch (error) { tiktokStatusElem.textContent = "Server Lokal Tidak Ditemukan!"; }
+        }
+
+        function processNewLogs(log_items) {
+            const newItems = log_items.filter(item => item.timestamp > lastTimestamp);
+            if(newItems.length === 0) return;
+            newItems.forEach(item => {
+                let html = '';
+                switch(item.type) {
+                    case 'comment': html = `<div class="log-item comment"><span class="user">${item.data.user}:</span> ${item.data.text}</div>`; break;
+                    case 'ai_response': html = `<div class="log-item ai_response"><span class="user">🤖 AI:</span> ${item.data.text}</div>`; speechQueue.push(item.data.text); processSpeechQueue(); break;
+                    case 'status': html = `<div class="log-item status"><span class="user">STATUS:</span> ${item.data.message}</div>`; break;
+                }
+                if(html) addLog(html);
+            });
+            if (log_items.length > 0) lastTimestamp = log_items[log_items.length - 1].timestamp;
+        }
+
+        function addLog(html) { const item = document.createElement('div'); item.innerHTML = html; logDiv.appendChild(item); logDiv.scrollTop = logDiv.scrollHeight; }
+
+        async function startTikTokConnection() {
+            const username = usernameInput.value.trim();
+            if (!username) { alert("Masukkan username TikTok!"); return; }
+            try { await fetch(`${API_URL}/api/start`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ username: username }) }); } 
+            catch (error) { alert("Gagal mengirim perintah start ke server lokal."); }
+        }
+        
+        startHostBtn.addEventListener('click', startHost);
+        startTiktokBtn.addEventListener('click', startTikTokConnection);
+        audioToggleBtn.addEventListener('click', toggleAudio);
+    });
+    </script>
+</body>
+</html>
