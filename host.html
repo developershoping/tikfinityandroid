@@ -1,0 +1,131 @@
+<!-- host.html -->
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <title>TikTok Bot - Control Panel</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #f0f2f5; margin: 20px; color: #333; }
+        .container { max-width: 800px; margin: auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+        h1, h2 { color: #1c1e21; border-bottom: 1px solid #ddd; padding-bottom: 10px; }
+        .host-info, .controls { margin-bottom: 20px; padding: 15px; background: #f7f8fa; border: 1px solid #ddd; border-radius: 6px; }
+        input[type="text"] { width: calc(100% - 24px); padding: 12px; border: 1px solid #ccc; border-radius: 6px; font-size: 16px; margin-bottom: 10px; }
+        button { font-size: 16px; padding: 12px 20px; border: none; border-radius: 6px; background-color: #1877f2; color: white; cursor: pointer; font-weight: bold; transition: background-color 0.2s; }
+        button:hover { background-color: #166fe5; }
+        button:disabled { background-color: #9cb4d8; cursor: not-allowed; }
+        #log { min-height: 200px; max-height: 400px; overflow-y: auto; border: 1px solid #ddd; padding: 10px; border-radius: 6px; background: #fff; }
+        .log-item { padding: 8px; border-bottom: 1px solid #f0f2f5; }
+        .log-item:last-child { border-bottom: none; }
+        .log-item .user { font-weight: bold; }
+        .log-item.comment .user { color: #050505; }
+        .log-item.greeting, .log-item.gift, .log-item.reminder { 
+            background-color: #e7f3ff; border-radius: 6px; margin: 5px 0; 
+        }
+        .log-item.greeting .user { color: #31a24c; }
+        .log-item.gift .user { color: #ffab00; }
+        .log-item.reminder .user { color: #8a3ab9; }
+        .log-item.status .user { font-weight: bold; color: #65676b; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>TikTok Bot - Control Panel</h1>
+        <div class="host-info">
+            Status Koneksi TikTok: <span id="tiktok-status">Idle</span><br>
+        </div>
+        <div class="controls">
+            <h2>Mulai Live</h2>
+            <input type="text" id="username-input" placeholder="Masukkan @username TikTok">
+            <button id="start-tiktok-btn" type="button">Mulai Koneksi TikTok</button>
+        </div>
+        <h2>Live Log</h2>
+        <div id="log"></div>
+    </div>
+
+    <script>
+    document.addEventListener('DOMContentLoaded', () => {
+        const API_URL = 'http://localhost:5000';
+        const tiktokStatusElem = document.getElementById('tiktok-status');
+        const usernameInput = document.getElementById('username-input');
+        const startTiktokBtn = document.getElementById('start-tiktok-btn');
+        const logDiv = document.getElementById('log');
+
+        let syncInterval = null;
+        let lastTimestamp = 0;
+
+        async function syncWithLocalServer() {
+            try {
+                const response = await fetch(`${API_URL}/api/status`);
+                const state = await response.json();
+                tiktokStatusElem.textContent = state.tiktok_status;
+                processNewLogs(state.log_items); 
+            } catch (error) { 
+                tiktokStatusElem.textContent = "Server Lokal Tidak Ditemukan!"; 
+            }
+        }
+
+        function processNewLogs(log_items) {
+            const newItems = log_items.filter(item => item.timestamp > lastTimestamp);
+            if (newItems.length === 0) return;
+            
+            newItems.forEach(item => {
+                let html = '';
+                const message = item.data.text || item.data.message;
+
+                switch(item.type) {
+                    case 'comment': 
+                        html = `<div class="log-item comment"><span class="user">${item.data.user}:</span> ${item.data.text}</div>`; 
+                        break;
+                    case 'greeting':
+                        html = `<div class="log-item greeting"><span class="user">👋 SAPAAN:</span> ${message}</div>`;
+                        break;
+                    case 'gift':
+                        html = `<div class="log-item gift"><span class="user">🎁 GIFT:</span> ${message}</div>`;
+                        break;
+                    case 'reminder':
+                        html = `<div class="log-item reminder"><span class="user">📢 BOT:</span> ${message}</div>`;
+                        break;
+                    case 'status': 
+                        html = `<div class="log-item status"><span class="user">STATUS:</span> ${item.data.message}</div>`; 
+                        break;
+                }
+                if(html) { addLog(html); }
+            });
+            
+            if (log_items.length > 0) {
+                lastTimestamp = log_items[log_items.length - 1].timestamp;
+            }
+        }
+
+        function addLog(html) {
+            const item = document.createElement('div');
+            item.innerHTML = html;
+            logDiv.appendChild(item);
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+
+        async function startTikTokConnection() {
+            const username = usernameInput.value.trim();
+            if (!username) { alert("Masukkan username TikTok!"); return; }
+            startTiktokBtn.disabled = true;
+            try {
+                await fetch(`${API_URL}/api/start`, { 
+                    method: 'POST', 
+                    headers: {'Content-Type': 'application/json'}, 
+                    body: JSON.stringify({ username: username }) 
+                });
+            } catch (error) { 
+                alert("Gagal mengirim perintah start ke server lokal.");
+            } finally {
+                startTiktokBtn.disabled = false;
+            }
+        }
+        
+        startTiktokBtn.addEventListener('click', startTikTokConnection);
+        
+        // Mulai sinkronisasi untuk menampilkan log
+        syncInterval = setInterval(syncWithLocalServer, 2000);
+    });
+    </script>
+</body>
+</html>

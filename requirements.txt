@@ -1,0 +1,6 @@
+requests
+gTTS playsound==1.2.2
+TikTokLive
+python-dotenv
+Flask
+Flask-Cors
