@@ -1,5 +1,0 @@
-requests
-TikTokLive-API
-python-dotenv
-Flask
-Flask-Cors
