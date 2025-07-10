@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TikTok TTS Bot - Host Panel</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #121212; color: #e0e0e0; margin: 0; padding: 20px; display: flex; flex-direction: column; height: 100vh; box-sizing: border-box; }
+        .container { display: flex; flex: 1; gap: 20px; overflow: hidden; }
+        .panel { background-color: #1e1e1e; border: 1px solid #333; border-radius: 8px; padding: 20px; overflow-y: auto; flex: 1; display: flex; flex-direction: column; }
+        .panel-control { flex: 0 0 350px; }
+        h1, h2 { color: #bb86fc; border-bottom: 2px solid #3700b3; padding-bottom: 10px; }
+        .status-box { padding: 15px; border-radius: 5px; margin-bottom: 20px; text-align: center; font-weight: bold; }
+        .status-idle { background-color: #444; }
+        .status-connecting { background-color: #b38600; }
+        .status-connected { background-color: #006400; }
+        .status-error { background-color: #8b0000; }
+        input[type="text"], select { width: calc(100% - 22px); padding: 10px; margin-bottom: 10px; border-radius: 5px; border: 1px solid #555; background-color: #333; color: #fff; }
+        button { width: 100%; padding: 12px; border: none; border-radius: 5px; background-color: #6200ee; color: white; font-size: 16px; cursor: pointer; transition: background-color 0.3s; margin-bottom: 10px; }
+        button:hover { background-color: #3700b3; }
+        button:disabled { background-color: #444; cursor: not-allowed; }
+        #log-container { list-style: none; padding: 0; margin: 0; font-family: 'Courier New', Courier, monospace; font-size: 14px; }
+        #log-container li { background-color: #2c2c2c; margin-bottom: 8px; padding: 10px; border-radius: 5px; border-left: 4px solid #bb86fc; white-space: pre-wrap; word-break: break-all; }
+        .log-subscribe { border-left-color: #ffd700 !important; color: #ffd700; font-weight: bold; }
+        .log-question { border-left-color: #1e90ff !important; }
+        .log-gift { border-left-color: #ff69b4 !important; }
+        .log-follow { border-left-color: #32cd32 !important; }
+        .log-join { border-left-color: #7b68ee !important; }
+        .log-share { border-left-color: #ff8c00 !important; }
+        .log-status { border-left-color: #4682b4 !important; }
+        .log-tts { border-left-color: #00bfff !important; opacity: 0.8; }
+        .tts-controls button { background-color: #03dac6; color: #121212; font-weight: bold; }
+        .tts-controls button:hover { background-color: #018786; }
+        .tts-status-active { color: #03dac6; }
+        .tts-status-inactive { color: #cf6679; }
+        label { display: block; margin-top: 15px; margin-bottom: 5px; }
+        .priority-indicator { color: #03dac6; font-weight: bold; margin-left: 5px; }
+        fieldset { border: 1px solid #333; border-radius: 8px; margin-bottom: 20px; padding: 15px; }
+        legend { color: #bb86fc; padding: 0 10px; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <!-- ELEMEN BARU: Audio senyap untuk menjaga koneksi di background -->
+    <audio id="silent-audio" loop></audio>
+
+    <h1>TikTok TTS Bot - Host Panel</h1>
+    <div class="container">
+        <div class="panel panel-control">
+            <!-- GRUP KONTROL SERVER -->
+            <fieldset>
+                <legend>1. Koneksi Server</legend>
+                <label for="server-url">Alamat Server Lokal:</label>
+                <input type="text" id="server-url" placeholder="cth: http://192.168.1.5:5000">
+                <p style="font-size: 12px; color: #aaa; margin-top: -5px;">Masukkan IP lokal & port dari server Python Anda.</p>
+            </fieldset>
+
+            <!-- GRUP KONTROL TIKTOK -->
+            <fieldset id="tiktok-controls" disabled>
+                <legend>2. Kontrol TikTok</legend>
+                <div id="status-box" class="status-box status-idle">Status: <span id="tiktok-status">Idle</span></div>
+                <input type="text" id="username" placeholder="@username_tiktok" required>
+                <button id="start-btn">Hubungkan ke TikTok</button>
+            </fieldset>
+            
+            <!-- GRUP KONTROL SUARA -->
+            <fieldset id="tts-controls" disabled>
+                <legend>3. Kontrol Suara</legend>
+                <div class="tts-controls">
+                    <p>Status: <span id="tts-status" class="tts-status-inactive">Nonaktif</span></p>
+                    <label for="voice-select">Pilih Suara:</label>
+                    <select id="voice-select" disabled></select>
+                    <label for="rate-slider">Kecepatan Baca: <span id="rate-value">1.0</span>x</label>
+                    <input type="range" id="rate-slider" min="0.5" max="2" step="0.1" value="1">
+                    <button id="start-tts-btn" style="margin-top: 20px;">Mulai Suara</button>
+                    <button id="test-tts-btn">Tes Suara</button>
+                </div>
+            </fieldset>
+        </div>
+        <div class="panel">
+            <h2>Live Log</h2>
+            <button id="clear-log-btn" style="width: auto; margin-bottom: 10px;">Bersihkan Log</button>
+            <ul id="log-container"></ul>
+        </div>
+    </div>
+
+<script>
+    // --- PERUBAHAN KUNCI: Variabel API_URL tidak lagi statis ---
+    let API_URL = '';
+
+    // DOM Elements
+    const elements = {
+        serverUrl: document.getElementById('server-url'),
+        tiktokControls: document.getElementById('tiktok-controls'),
+        ttsControls: document.getElementById('tts-controls'),
+        username: document.getElementById('username'),
+        startBtn: document.getElementById('start-btn'),
+        ttsStatus: document.getElementById('tts-status'),
+        voiceSelect: document.getElementById('voice-select'),
+        rateSlider: document.getElementById('rate-slider'),
+        rateValue: document.getElementById('rate-value'),
+        logContainer: document.getElementById('log-container'),
+        tiktokStatus: document.getElementById('tiktok-status'),
+        statusBox: document.getElementById('status-box'),
+        startTtsBtn: document.getElementById('start-tts-btn'),
+        testTtsBtn: document.getElementById('test-tts-btn'),
+        clearLogBtn: document.getElementById('clear-log-btn'),
+        silentAudio: document.getElementById('silent-audio')
+    };
+
+    // App State
+    const state = {
+        lastProcessedTimestamp: 0,
+        ttsQueue: [],
+        ttsEnabled: false,
+        voices: [],
+        isSpeaking: false,
+        fetchIntervalId: null
+    };
+    
+    // --- PERUBAHAN KUNCI: Audio senyap untuk background playback ---
+    // Data URI untuk file wav 1 detik yang sunyi
+    const silentWav = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=";
+    elements.silentAudio.src = silentWav;
+
+    function setApiUrl(url) {
+        if (!url || !url.startsWith('http')) {
+            alert('URL Server tidak valid. Harap gunakan format http://... atau https://...');
+            return false;
+        }
+        API_URL = url.replace(/\/$/, ''); // Hapus trailing slash
+        localStorage.setItem('tiktokTtsServerUrl', API_URL);
+        console.log(`Server URL diatur ke: ${API_URL}`);
+        elements.tiktokControls.disabled = false;
+        elements.ttsControls.disabled = false;
+
+        // Mulai polling setelah URL diatur
+        if (state.fetchIntervalId) clearInterval(state.fetchIntervalId);
+        state.fetchIntervalId = setInterval(fetchStatus, 2000);
+        fetchStatus(); // Panggil sekali segera
+        return true;
+    }
+
+    function initializeApp() {
+        const savedUrl = localStorage.getItem('tiktokTtsServerUrl');
+        if (savedUrl) {
+            elements.serverUrl.value = savedUrl;
+            setApiUrl(savedUrl);
+        }
+
+        elements.serverUrl.addEventListener('change', () => {
+            setApiUrl(elements.serverUrl.value);
+        });
+
+        // Populate voice list
+        if (window.speechSynthesis.onvoiceschanged !== undefined) {
+            window.speechSynthesis.onvoiceschanged = populateVoiceList;
+        }
+        populateVoiceList();
+    }
+    
+    function populateVoiceList() {
+        // (Fungsi ini tidak berubah, biarkan seperti aslinya)
+        state.voices = window.speechSynthesis.getVoices();
+        elements.voiceSelect.innerHTML = '';
+        if (state.voices.length === 0) {
+            elements.voiceSelect.innerHTML = '<option>Tidak ada suara terinstal</option>'; return;
+        }
+        const allowedLanguages = ['id-ID', 'ms-MY', 'jv-ID', 'id-NT'];
+        const filteredVoices = state.voices.filter(voice => allowedLanguages.some(lang => voice.lang.includes(lang))).sort((a, b) => a.lang.localeCompare(b.lang));
+        if (filteredVoices.length === 0) {
+            elements.voiceSelect.innerHTML = '<option>Suara tidak tersedia (ID/MS/JV/NT)</option>'; return;
+        }
+        filteredVoices.forEach(voice => {
+            const option = document.createElement('option');
+            option.textContent = `${voice.name} (${voice.lang})`;
+            option.setAttribute('data-name', voice.name);
+            option.setAttribute('data-lang', voice.lang);
+            elements.voiceSelect.appendChild(option);
+            if (voice.lang === 'id-ID') option.selected = true;
+        });
+        elements.voiceSelect.disabled = false;
+    }
+
+    async function fetchStatus() {
+        if (!API_URL) return; // Jangan fetch jika URL belum diatur
+        try {
+            const response = await fetch(`${API_URL}/api/status`);
+            if (!response.ok) throw new Error(`HTTP error: ${response.status}`);
+            
+            const data = await response.json();
+            updateStatusUI(data.tiktok_status);
+            updateLogUI(data.log_items);
+            
+            const newTtsItems = data.log_items.filter(item => item.type === 'tts' && item.datetime > state.lastProcessedTimestamp);
+            newTtsItems.forEach(item => {
+                state.ttsQueue.push({ text: item.data.text, priority: item.data.priority || false });
+            });
+
+            if (state.ttsEnabled && !state.isSpeaking) processTtsQueue();
+            if (data.log_items.length > 0) state.lastProcessedTimestamp = data.log_items[data.log_items.length - 1].datetime;
+        } catch (error) {
+            console.error('Gagal mengambil status:', error);
+            updateStatusUI('Error');
+        }
+    }
+
+    function processTtsQueue() {
+        if (!state.ttsEnabled || state.ttsQueue.length === 0 || state.isSpeaking) return;
+        
+        state.ttsQueue.sort((a, b) => (b.priority - a.priority));
+        state.isSpeaking = true;
+        const message = state.ttsQueue.shift();
+        const utterance = new SpeechSynthesisUtterance(message.text);
+        
+        const selectedVoiceName = elements.voiceSelect.selectedOptions[0]?.getAttribute('data-name');
+        const selectedVoice = state.voices.find(voice => voice.name === selectedVoiceName);
+        if (selectedVoice) utterance.voice = selectedVoice;
+        else utterance.lang = 'id-ID';
+        
+        utterance.rate = parseFloat(elements.rateSlider.value);
+        utterance.onend = () => {
+            state.isSpeaking = false;
+            setTimeout(processTtsQueue, 100);
+        };
+        utterance.onerror = (e) => {
+            console.error('TTS Error:', e);
+            state.isSpeaking = false;
+            setTimeout(processTtsQueue, 100);
+        };
+        window.speechSynthesis.speak(utterance);
+    }
+    
+    // --- PERUBAHAN KUNCI: Setup Media Session API ---
+    function setupMediaSession() {
+        if ('mediaSession' in navigator) {
+            navigator.mediaSession.metadata = new MediaMetadata({
+                title: 'TikTok TTS Bot',
+                artist: 'Aktif Membaca Notifikasi',
+                album: 'Live Stream',
+                artwork: [{ src: 'https://p16-va-tiktok.ibyteimg.com/img/musically-maliva-obj/1665282736443397~c5_100x100.jpeg', sizes: '96x96', type: 'image/jpeg' }]
+            });
+            navigator.mediaSession.setActionHandler('play', () => startTts());
+            navigator.mediaSession.setActionHandler('pause', () => stopTts());
+        }
+    }
+
+    function startTts() {
+        state.ttsEnabled = true;
+        elements.ttsStatus.textContent = 'Aktif';
+        elements.ttsStatus.className = 'tts-status-active';
+        elements.startTtsBtn.textContent = 'Hentikan Suara';
+        
+        // Mainkan audio senyap untuk menjaga sesi
+        elements.silentAudio.play().catch(e => console.error("Gagal memulai audio senyap:", e));
+        
+        setupMediaSession();
+        processTtsQueue();
+    }
+    
+    function stopTts() {
+        state.ttsEnabled = false;
+        elements.ttsStatus.textContent = 'Nonaktif';
+        elements.ttsStatus.className = 'tts-status-inactive';
+        elements.startTtsBtn.textContent = 'Mulai Suara';
+        
+        // Hentikan audio senyap
+        elements.silentAudio.pause();
+        
+        window.speechSynthesis.cancel();
+        state.ttsQueue = [];
+        state.isSpeaking = false;
+    }
+
+    // (Fungsi updateStatusUI dan updateLogUI tidak berubah, biarkan seperti aslinya)
+    function updateStatusUI(status) {
+        elements.tiktokStatus.textContent = status;
+        elements.statusBox.className = 'status-box';
+        elements.statusBox.classList.add(`status-${status.toLowerCase()}`);
+    }
+    function updateLogUI(logItems) {
+        const shouldScroll = elements.logContainer.scrollTop === 0 || (elements.logContainer.scrollTop + elements.logContainer.clientHeight >= elements.logContainer.scrollHeight - 20);
+        const existingTimestamps = Array.from(elements.logContainer.children).map(li => li.getAttribute('data-timestamp'));
+        logItems.slice().reverse().forEach(item => {
+            if (existingTimestamps.includes(item.datetime.toString())) return;
+            const li = document.createElement('li');
+            li.setAttribute('data-timestamp', item.datetime);
+            let content = '', icon = '', className = '';
+            switch(item.type) {
+                case 'status': content = item.data.message; icon = '📢'; className = 'log-status'; break;
+                case 'join': content = `${item.data.user} bergabung`; icon = '👋'; className = 'log-join'; break;
+                case 'comment': content = `${item.data.user}: ${item.data.text}`; icon = '💬'; break;
+                case 'gift': const count = item.data.count || 1; const giftName = item.data.gift_name || 'hadiah'; content = `${item.data.user} → ${count}x ${giftName}`; if (item.data.value) content += ` (${item.data.value}💎)`; icon = '🎁'; className = 'log-gift'; break;
+                case 'like': content = `${item.data.user} menyukai live`; icon = '❤️'; break;
+                case 'share': content = `${item.data.user} membagikan live`; icon = '🔗'; className = 'log-share'; break;
+                case 'follow': content = `${item.data.user} follow`; icon = '➕'; className = 'log-follow'; break;
+                case 'subscribe': content = `${item.data.user} BERLANGGANAN!`; icon = '⭐'; className = 'log-subscribe'; break;
+                case 'question': content = `${item.data.user}: ${item.data.text}`; icon = '❓'; className = 'log-question'; break;
+                case 'poll': content = `Poll: ${item.data.options}`; icon = '📊'; break;
+                case 'live_end': content = `LIVE BERAKHIR`; icon = '🏁'; li.style.fontWeight = 'bold'; break;
+                case 'tts': content = item.data.text; if (item.data.priority) content += '<span class="priority-indicator">[PENTING]</span>'; icon = '🔊'; className = 'log-tts'; break;
+                default: content = `[${item.type}] ${JSON.stringify(item.data)}`;
+            }
+            li.innerHTML = `${icon} ${content}`;
+            if (className) li.classList.add(className);
+            elements.logContainer.insertBefore(li, elements.logContainer.firstChild);
+        });
+        if (shouldScroll) elements.logContainer.scrollTop = 0;
+    }
+
+    // Event Listeners
+    elements.startBtn.addEventListener('click', async () => {
+        const username = elements.username.value.replace('@', '').trim();
+        if (!username) {
+            alert('Username TikTok tidak boleh kosong!');
+            return;
+        }
+        try {
+            const response = await fetch(`${API_URL}/api/start`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username })
+            });
+            if (!response.ok) throw new Error(await response.text());
+        } catch (error) {
+            console.error('Gagal terhubung:', error);
+            alert(`Gagal terhubung: ${error.message}`);
+        }
+    });
+
+    elements.startTtsBtn.addEventListener('click', () => {
+        if (state.ttsEnabled) stopTts();
+        else startTts();
+    });
+
+    elements.testTtsBtn.addEventListener('click', () => {
+        const testMessage = new SpeechSynthesisUtterance('Ini adalah tes suara. Sistem TTS berfungsi dengan baik.');
+        const selectedVoiceName = elements.voiceSelect.selectedOptions[0]?.getAttribute('data-name');
+        const selectedVoice = state.voices.find(voice => voice.name === selectedVoiceName);
+        if (selectedVoice) testMessage.voice = selectedVoice;
+        else testMessage.lang = 'id-ID';
+        testMessage.rate = parseFloat(elements.rateSlider.value);
+        window.speechSynthesis.speak(testMessage);
+    });
+
+    elements.clearLogBtn.addEventListener('click', () => {
+        elements.logContainer.innerHTML = '';
+    });
+
+    elements.rateSlider.addEventListener('input', () => {
+        elements.rateValue.textContent = parseFloat(elements.rateSlider.value).toFixed(1);
+    });
+
+    // Initialize App
+    initializeApp();
+</script>
+</body>
+</html>
